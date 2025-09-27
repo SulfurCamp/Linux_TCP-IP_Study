@@ -1,0 +1,126 @@
+서버를 실행하고 클라이언트를 실행한다. 클라이언트에서 입력한 값은 서버에서 보인다.
+이떄 q를 누르게 되면 자식 프로세스값이 지워지는 것을 명시하고 리턴값 또한 명시한다.
+이는 클라이언트 창에서 보인다.
+부모 프로세스가 종료하면 자식 프로세스도 종료되게 해보자.
+
+프로세스간에 통신 자 
+
+
+1 #include <stdio.h>
+  2 #include <stdlib.h>
+  3 #include <string.h>
+  4 #include <unistd.h>
+  5 #include <arpa/inet.h>
+  6 #include <sys/socket.h>
+  7 #include <sys/wait.h>
+  8 #include <signal.h>
+  9
+ 10 #define BUF_SIZE 30
+ 11 void error_handling(char *message);
+ 12 void read_routine(int sock, char *buf);
+ 13 void write_routine(int sock, char *buf);
+ 14
+ 15 void read_childproc(int sig)
+ 16 {
+ 17     int status;
+ 18     pid_t id = waitpid(-1, &status, WNOHANG);
+ 19     if(WIFEXITED(status))
+ 20     {
+ 21         printf("removed proc id: %d, return: %d\n", id, WEXITSTATUS(status    ));
+ 22     }
+ 23 }
+ 24
+ 25 int main(int argc, char *argv[])
+ 26 {
+ 27     int sock;
+ 28     pid_t pid1, pid2;
+ 29     char buf[BUF_SIZE];
+ 30     struct sockaddr_in serv_adr;
+ 31
+ 32     struct sigaction act;
+ 33     act.sa_handler = read_childproc;
+ 34     sigemptyset(&act.sa_mask);
+ 35     act.sa_flags = 0;
+ 36     sigaction(SIGCHLD, &act, 0);
+ 37
+ 38     if(argc!=3) {
+ 39         printf("Usage : %s <IP> <port>\n", argv[0]);
+40         exit(1);
+ 41     }
+ 42
+ 43     sock=socket(PF_INET, SOCK_STREAM, 0);
+ 44     memset(&serv_adr, 0, sizeof(serv_adr));
+ 45     serv_adr.sin_family=AF_INET;
+ 46     serv_adr.sin_addr.s_addr=inet_addr(argv[1]);
+ 47     serv_adr.sin_port=htons(atoi(argv[2]));
+ 48
+ 49     if(connect(sock, (struct sockaddr*)&serv_adr, sizeof(serv_adr))==-1)
+ 50         error_handling("connect() error!");
+ 51
+ 52     pid1=fork();
+ 53     if(pid1==0)
+ 54         write_routine(sock, buf);
+ 55     else
+ 56     {
+ 57         pid2=fork();
+ 58         if(pid2 == 0)
+ 59             read_routine(sock, buf); // 부모프로세스 실행중 --> 자식프로세
+    스로 실행
+ 60         else{
+ 61             int status;
+ 62             pid_t result;
+ 63             while(1)
+ 64             {
+ 65                 int status;
+ 66                 pid_t result = waitpid(pid2, &status, WNOHANG);
+ 67 //              printf("removed proc id: %d, return : %d\n",pid2,WEXITSTAT    US(status));
+ 68                 if(result == 0){
+ 69                     sleep(1);
+ 70                     continue;
+ 71                 }else if(result > 0)
+ 72                 {
+ 73                     if(WIFEXITED(status))
+ 74                         printf("removed proc id: %d, return : %d\n", resul    t, WEXITSTATUS(status));
+ 75 // 자식 프로세스 둘다 종료시 While문 종료
+ 76                 }
+77                 else
+ 78                     break;
+ 79             }
+ 80         }
+ 81     }
+ 82     close(sock);
+ 83     return 0;
+ 84
+ 85 }
+ 86 void read_routine(int sock, char *buf)
+ 87 {
+ 88     while(1)
+ 89     {
+ 90         int str_len=read(sock, buf, BUF_SIZE);
+ 91         if(str_len==0)
+ 92             exit(1);
+ 93
+ 94         buf[str_len]=0;
+ 95         printf("Message from server: %s", buf);
+ 96     }
+ 97 }
+ 98 void write_routine(int sock, char *buf)
+ 99 {
+100     while(1)
+101     {
+102         fgets(buf, BUF_SIZE, stdin);
+103         if(!strcmp(buf,"q\n") || !strcmp(buf,"Q\n"))
+104         {
+105             shutdown(sock, SHUT_WR);
+106             exit(2);
+107             return;
+108         }
+109         write(sock, buf, strlen(buf));
+110     }
+111 }
+112 void error_handling(char *message)
+113 {
+114     fputs(message, stderr);
+115     fputc('\n', stderr);
+116     exit(1);
+117 }
